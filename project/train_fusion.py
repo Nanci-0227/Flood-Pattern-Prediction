@@ -24,23 +24,29 @@ from config import get_device, rule_risk_index
 from models.fusion import RiskFusionNet
 
 FEATURE_COLS = ["ratio", "change_rate", "pred_ratio", "rain", "drain_rate"]
+REQUIRED_FEATURE_COLS = ["ratio", "change_rate", "pred_ratio", "rain"]
 
 
 def load_features(csv_path: str):
     df = pd.read_csv(csv_path)
-    cols = [c for c in FEATURE_COLS if c in df.columns]
-    missing = set(["ratio", "rain"]) - set(cols)
+    missing = set(REQUIRED_FEATURE_COLS) - set(df.columns)
     if missing:
         raise SystemExit(f"CSV 缺少必要特征列：{missing}")
+    # 在线推理固定输入五维特征；训练阶段缺少排水速率时以 0 填补，
+    # 避免训练权重与 infer_video.py 的输入维度不一致。
+    if "drain_rate" not in df.columns:
+        df["drain_rate"] = 0.0
+    cols = FEATURE_COLS
     X = df[cols].to_numpy(dtype=np.float32)
 
     if "label" in df.columns:
         y = df["label"].to_numpy(dtype=np.int64)
     else:
         print("[提示] 未发现 label 列，使用 config.rule_risk_index 生成伪标签")
-        y = np.array([rule_risk_index(r[0], r[2] if "pred_ratio" in cols else r[0],
-                                      r[cols.index("rain")]) for r in X],
+        y = np.array([rule_risk_index(r[0], r[2], r[3]) for r in X],
                      dtype=np.int64)
+    if np.any((y < 0) | (y >= config.FUSION_CLASSES)):
+        raise SystemExit(f"label 必须在 0..{config.FUSION_CLASSES - 1} 范围内")
     return X, y, cols
 
 
@@ -58,13 +64,12 @@ def main():
     print(f"[数据] 特征列：{cols}，样本数：{len(y)}")
 
     device = get_device()
-    ds = TensorDataset(torch.from_numpy(X).float().to(device),
-                       torch.from_numpy(y).long().to(device))
+    ds = TensorDataset(torch.from_numpy(X).float(), torch.from_numpy(y).long())
     n_val = max(1, int(len(ds) * args.val_split))
     n_train = len(ds) - n_val
     train_ds, val_ds = random_split(ds, [n_train, n_val],
                                     generator=torch.Generator().manual_seed(42))
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
     model = RiskFusionNet(input_dim=input_dim,
@@ -79,6 +84,7 @@ def main():
         model.train()
         train_loss, n = 0.0, 0
         for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}"):
+            xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad()
             loss = criterion(model(xb), yb)
             loss.backward()
@@ -90,11 +96,12 @@ def main():
         correct, total = 0, 0
         with torch.no_grad():
             for xb, yb in val_loader:
+                xb, yb = xb.to(device), yb.to(device)
                 pred = model(xb).argmax(dim=1)
                 correct += (pred == yb).sum().item()
                 total += yb.size(0)
         acc = correct / max(total, 1)
-        print(f"Epoch {epoch} | train_loss={train_loss / n:.4f} | val_acc={acc:.4f}")
+        print(f"Epoch {epoch} | train_loss={train_loss / max(n, 1):.4f} | val_acc={acc:.4f}")
 
         if acc > best_acc:
             best_acc = acc

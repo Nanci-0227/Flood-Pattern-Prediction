@@ -44,15 +44,15 @@ def main():
     print(f"[数据] 序列样本数：{X.shape}，标签：{y.shape}")
 
     device = get_device()
-    X_t = torch.from_numpy(X).to(device)
-    y_t = torch.from_numpy(y).to(device)
+    X_t = torch.from_numpy(X)
+    y_t = torch.from_numpy(y)
 
     ds = TensorDataset(X_t, y_t)
     n_val = max(1, int(len(ds) * args.val_split))
     n_train = len(ds) - n_val
     train_ds, val_ds = random_split(ds, [n_train, n_val],
                                     generator=torch.Generator().manual_seed(42))
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
     model = LSTMPredictor(input_dim=config.LSTM_INPUT_DIM,
@@ -68,6 +68,7 @@ def main():
         model.train()
         train_loss, n = 0.0, 0
         for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}"):
+            xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad()
             out = model(xb)
             loss = criterion(out, yb)
@@ -80,11 +81,12 @@ def main():
         val_loss, m = 0.0, 0
         with torch.no_grad():
             for xb, yb in val_loader:
+                xb, yb = xb.to(device), yb.to(device)
                 out = model(xb)
                 val_loss += criterion(out, yb).item()
                 m += 1
         val_loss = val_loss / max(m, 1)
-        print(f"Epoch {epoch} | train_loss={train_loss / n:.6f} | val_loss={val_loss:.6f}")
+        print(f"Epoch {epoch} | train_loss={train_loss / max(n, 1):.6f} | val_loss={val_loss:.6f}")
 
         if val_loss < best_loss:
             best_loss = val_loss

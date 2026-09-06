@@ -86,10 +86,13 @@ EMERGENCY_PLAN = {
 
 def rain_level_index(rain_mm_per_h: float) -> int:
     """将降雨强度(mm/h)映射为等级索引 0..4"""
-    for i, (thr, _) in enumerate(RAIN_LEVELS):
-        if rain_mm_per_h < thr:
-            return i
-    return len(RAIN_LEVELS) - 1
+    level = 0
+    for i, (threshold, _) in enumerate(RAIN_LEVELS):
+        if rain_mm_per_h >= threshold:
+            level = i
+        else:
+            break
+    return level
 
 
 def risk_label(idx: int) -> str:

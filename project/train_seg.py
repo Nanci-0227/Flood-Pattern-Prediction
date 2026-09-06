@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.cuda.amp import GradScaler, autocast
@@ -115,7 +115,7 @@ def evaluate(model, loader, device):
     dices = []
     for imgs, masks in loader:
         imgs = imgs.to(device)
-        probs = model(imgs)[:, 1]                 # 积水概率
+        probs = torch.softmax(model(imgs), dim=1)[:, 1]
         preds = (probs > 0.5).float()
         inter = (preds * masks.to(device)).sum(dim=(1, 2))
         union = preds.sum(dim=(1, 2)) + masks.to(device).sum(dim=(1, 2))
@@ -137,17 +137,20 @@ def main():
     device = get_device()
     print(f"[设备] {device}")
 
-    full = FloodDataset(args.image_dir, args.mask_dir, augment=True)
-    n_val = max(1, int(len(full) * args.val_split))
-    n_train = len(full) - n_val
-    train_ds, val_ds = random_split(full, [n_train, n_val],
-                                    generator=torch.Generator().manual_seed(42))
-    val_ds.augment = False   # 验证不增强
-
+    train_base = FloodDataset(args.image_dir, args.mask_dir, augment=True)
+    val_base = FloodDataset(args.image_dir, args.mask_dir, augment=False)
+    if len(train_base) < 2:
+        raise ValueError("至少需要 2 张图像，才能划分训练集和验证集")
+    n_val = max(1, int(len(train_base) * args.val_split))
+    n_val = min(n_val, len(train_base) - 1)
+    indices = torch.randperm(len(train_base), generator=torch.Generator().manual_seed(42)).tolist()
+    train_ds = Subset(train_base, indices[n_val:])
+    val_ds = Subset(val_base, indices[:n_val])
+    pin_memory = device.type == "cuda"
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, pin_memory=True, drop_last=True)
+                              num_workers=args.num_workers, pin_memory=pin_memory)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                            num_workers=args.num_workers, pin_memory=True)
+                            num_workers=args.num_workers, pin_memory=pin_memory)
 
     model = Segmentor(encoder_name=config.SEG_ENCODER,
                       encoder_weights=config.SEG_ENCODER_WEIGHTS,
@@ -174,14 +177,13 @@ def main():
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
-
             total_loss += loss.item()
             n += 1
             pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         val_dice = evaluate(model, val_loader, device)
-        print(f"Epoch {epoch} | train_loss={total_loss / n:.4f} | val_dice={val_dice:.4f}")
+        scheduler.step()
+        print(f"Epoch {epoch} | train_loss={total_loss / max(n, 1):.4f} | val_dice={val_dice:.4f}")
 
         if val_dice > best_dice:
             best_dice = val_dice
