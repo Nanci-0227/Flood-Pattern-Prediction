@@ -55,6 +55,8 @@ FUSION_CHECKPOINT = CHECKPOINT_DIR / "fusion_best.pth"
 SAMPLE_INTERVAL = 2.0               # 秒，采样间隔
 INFER_DEVICE = "auto"               # auto / cuda / cpu
 OVERLAY_ALPHA = 0.45                # 分割掩码叠加透明度
+RISK_SMOOTH_WINDOW = 5              # 风险中位数平滑窗口（采样点）
+RISK_DOWNGRADE_HOLD = 3             # 连续低风险采样点数达到后才允许降级
 
 # ===================== 风险等级（BGR 颜色） =====================
 # 键 = 类别索引，元组 = (名称, 描述, BGR颜色)

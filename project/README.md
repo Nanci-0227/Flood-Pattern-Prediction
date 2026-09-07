@@ -109,6 +109,11 @@ python infer_video.py --video data/video/demo.mp4 --backend hsv --rain 30
 | `--backend` | 分割后端：`unet` / `hsv`，默认 `unet` |
 | `--rain` | 降雨强度（mm/h），默认 25 |
 | `--output` | 输出视频路径，默认 `result/output.mp4` |
+| `--event_log` | 风险事件 CSV，默认 `result/risk_events.csv` |
+| `--risk_window` | 风险平滑窗口，默认 5 个采样点 |
+| `--downgrade_hold` | 允许降级前需连续确认的低风险采样点数，默认 3 |
+
+推理会将每个采样点的面积比、预测值、原始风险、稳定风险、模型置信度（如有）及处置建议写入 CSV。风险升级即时生效；风险降级需要连续低风险确认，以减少光照、反光和短暂遮挡导致的告警跳变。
 
 ## 兜底机制
 
