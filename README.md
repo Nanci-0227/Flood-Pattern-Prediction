@@ -20,4 +20,10 @@ python infer_video.py --video data/video/demo.mp4 --backend unet --rain 30
 - 时序数据至少包含 `ratio` 列；风险融合数据需包含 `ratio`、`change_rate`、`pred_ratio`、`rain`，`drain_rate` 缺失时按 0 处理。
 - 应按摄像头点位、降雨事件或视频片段划分训练/验证/测试集，避免相邻帧泄漏到不同集合。
 
+## 评估输出
+
+- 分割训练输出 Dice、IoU、Precision、Recall。
+- LSTM 预测按时间顺序留出未来数据，并输出验证集 MSE、MAE、RMSE。
+- 风险融合训练将 CSV 尾部时间段作为验证集，输出 Accuracy、Macro-F1 及各风险等级召回率；橙色、红色等级的漏报应重点分析。
+
 模型权重、原始视频与实验输出默认不提交到仓库；请在实验记录中注明数据来源、划分方式、随机种子和评估指标。

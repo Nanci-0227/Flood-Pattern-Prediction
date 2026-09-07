@@ -110,17 +110,22 @@ class FocalDiceLoss(nn.Module):
 
 @torch.no_grad()
 def evaluate(model, loader, device):
-    """验证集平均 Dice。"""
+    """验证集的像素级 Dice、IoU、Precision、Recall。"""
     model.eval()
-    dices = []
+    tp = fp = fn = 0
     for imgs, masks in loader:
         imgs = imgs.to(device)
         probs = torch.softmax(model(imgs), dim=1)[:, 1]
-        preds = (probs > 0.5).float()
-        inter = (preds * masks.to(device)).sum(dim=(1, 2))
-        union = preds.sum(dim=(1, 2)) + masks.to(device).sum(dim=(1, 2))
-        dices.append(((2 * inter + 1) / (union + 1)).cpu().numpy())
-    return float(np.concatenate(dices).mean()) if dices else 0.0
+        preds = probs > 0.5
+        target = masks.to(device).bool()
+        tp += torch.logical_and(preds, target).sum().item()
+        fp += torch.logical_and(preds, ~target).sum().item()
+        fn += torch.logical_and(~preds, target).sum().item()
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    dice = 2 * tp / max(2 * tp + fp + fn, 1)
+    iou = tp / max(tp + fp + fn, 1)
+    return {"dice": dice, "iou": iou, "precision": precision, "recall": recall}
 
 
 def main():
@@ -181,9 +186,15 @@ def main():
             n += 1
             pbar.set_postfix(loss=f"{loss.item():.4f}")
 
-        val_dice = evaluate(model, val_loader, device)
+        val_metrics = evaluate(model, val_loader, device)
+        val_dice = val_metrics["dice"]
         scheduler.step()
-        print(f"Epoch {epoch} | train_loss={total_loss / max(n, 1):.4f} | val_dice={val_dice:.4f}")
+        print(
+            f"Epoch {epoch} | train_loss={total_loss / max(n, 1):.4f} "
+            f"| val_dice={val_dice:.4f} | val_iou={val_metrics['iou']:.4f} "
+            f"| val_precision={val_metrics['precision']:.4f} "
+            f"| val_recall={val_metrics['recall']:.4f}"
+        )
 
         if val_dice > best_dice:
             best_dice = val_dice

@@ -8,13 +8,11 @@
     python train_lstm.py --csv data/series/ratio.csv
 """
 import argparse
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 from torch.optim import Adam
 from tqdm import tqdm
 
@@ -22,6 +20,7 @@ import config
 from config import get_device
 from models.predictor import LSTMPredictor
 from utils.video_processing import build_lstm_dataset
+from utils.metrics import mae, rmse
 
 
 def main():
@@ -34,6 +33,8 @@ def main():
     ap.add_argument("--lr", type=float, default=config.LSTM_LR)
     ap.add_argument("--val_split", type=float, default=0.2)
     args = ap.parse_args()
+    if not 0.0 < args.val_split < 1.0:
+        raise SystemExit("val_split 必须位于 0 与 1 之间")
 
     df = pd.read_csv(args.csv)
     if "ratio" not in df.columns:
@@ -41,17 +42,21 @@ def main():
     ratios = df["ratio"].to_numpy(dtype=np.float32)
 
     X, y = build_lstm_dataset(ratios, args.seq_len, args.future_steps)
-    print(f"[数据] 序列样本数：{X.shape}，标签：{y.shape}")
+    # 时序任务不能随机切分相邻窗口，否则训练集会看到验证期附近的观测值。
+    split_point = int(len(ratios) * (1.0 - args.val_split))
+    train_count = split_point - args.seq_len - args.future_steps + 1
+    val_start = split_point
+    if train_count <= 0 or val_start >= len(X):
+        raise SystemExit("数据量不足以按时间划分训练/验证集；请增加序列长度或减小验证比例")
+    print(f"[数据] 序列样本数：{X.shape}，标签：{y.shape}，时间切分点：{split_point}")
 
     device = get_device()
     X_t = torch.from_numpy(X)
     y_t = torch.from_numpy(y)
 
-    ds = TensorDataset(X_t, y_t)
-    n_val = max(1, int(len(ds) * args.val_split))
-    n_train = len(ds) - n_val
-    train_ds, val_ds = random_split(ds, [n_train, n_val],
-                                    generator=torch.Generator().manual_seed(42))
+    train_ds = TensorDataset(X_t[:train_count], y_t[:train_count])
+    # 丢弃跨越切分点的窗口，让验证输入与标签完全位于未来时间段。
+    val_ds = TensorDataset(X_t[val_start:], y_t[val_start:])
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
@@ -79,14 +84,23 @@ def main():
 
         model.eval()
         val_loss, m = 0.0, 0
+        all_pred, all_target = [], []
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 out = model(xb)
                 val_loss += criterion(out, yb).item()
                 m += 1
+                all_pred.append(out.cpu().numpy())
+                all_target.append(yb.cpu().numpy())
         val_loss = val_loss / max(m, 1)
-        print(f"Epoch {epoch} | train_loss={train_loss / max(n, 1):.6f} | val_loss={val_loss:.6f}")
+        pred = np.concatenate(all_pred, axis=0)
+        target = np.concatenate(all_target, axis=0)
+        print(
+            f"Epoch {epoch} | train_loss={train_loss / max(n, 1):.6f} "
+            f"| val_mse={val_loss:.6f} | val_mae={mae(pred, target):.6f} "
+            f"| val_rmse={rmse(pred, target):.6f}"
+        )
 
         if val_loss < best_loss:
             best_loss = val_loss
