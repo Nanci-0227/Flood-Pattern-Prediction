@@ -14,6 +14,16 @@ pip install -r requirements.txt
 python infer_video.py --video data/video/demo.mp4 --backend unet --rain 30
 ```
 
+## 快捷启动界面
+
+在 Windows 中双击根目录的 `start_app.bat`，即可打开桌面控制台。通过界面选择监控视频、填写降雨强度、选择 `unet` 或 `hsv` 分割方式，再点击“开始风险分析”。分析完成后可直接打开叠加预警的视频和风险事件 CSV。
+
+若首次启动失败，请在 `project/` 目录安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
 ## 复现实验要求
 
 - 分割数据应提供道路图像与同名二值积水掩码。
