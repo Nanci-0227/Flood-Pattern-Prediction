@@ -25,6 +25,7 @@ from models.fusion import RiskFusionNet
 from utils.baseline import hsv_water_mask
 from utils.visualization import overlay_mask, draw_risk_panel, draw_trend_curve
 from utils.video_processing import read_video_info, iter_frames
+from utils.risk_state import RiskEventWriter, RiskStateSmoother
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -113,7 +114,9 @@ def fusion_predict(fusion, device, ratio, change, pred_ratio, rain):
     feat = torch.tensor([[ratio, change, pred_ratio, rain, 0.0]],
                         dtype=torch.float32).to(device)
     with torch.no_grad():
-        return int(fusion(feat).argmax(dim=1).item())
+        probabilities = torch.softmax(fusion(feat), dim=1)[0]
+        risk_idx = int(probabilities.argmax().item())
+        return risk_idx, float(probabilities[risk_idx].item())
 
 
 def main():
@@ -122,7 +125,14 @@ def main():
     ap.add_argument("--backend", choices=["unet", "hsv"], default="unet")
     ap.add_argument("--rain", type=float, default=25.0, help="降雨强度 mm/h")
     ap.add_argument("--output", default=None, help="输出视频路径（默认 result/output.mp4）")
+    ap.add_argument("--event_log", default=None, help="风险事件 CSV（默认 result/risk_events.csv）")
+    ap.add_argument("--risk_window", type=int, default=config.RISK_SMOOTH_WINDOW,
+                    help="风险平滑窗口（采样点）")
+    ap.add_argument("--downgrade_hold", type=int, default=config.RISK_DOWNGRADE_HOLD,
+                    help="连续低风险采样点数达到后才允许降级")
     args = ap.parse_args()
+    if args.risk_window < 1 or args.downgrade_hold < 1:
+        raise SystemExit("risk_window 和 downgrade_hold 必须大于 0")
 
     device = get_device()
     print(f"[设备] {device}")
@@ -149,12 +159,16 @@ def main():
     writer = None
     history = []
     frame_idx = 0
+    event_path = args.event_log or str(config.RESULT_DIR / "risk_events.csv")
+    event_writer = RiskEventWriter(event_path)
+    risk_smoother = RiskStateSmoother(args.risk_window, args.downgrade_hold)
 
     for frame in iter_frames(args.video, step=1):
         mask = segment_frame(frame, seg_model, device, backend)
         ratio = float(mask.mean())
 
-        if frame_idx % sample_step == 0:
+        is_sample = frame_idx % sample_step == 0
+        if is_sample:
             history.append(ratio)
 
         change = (history[-1] - history[-2]) if len(history) >= 2 else 0.0
@@ -166,9 +180,27 @@ def main():
             pred_ratio = ratio
 
         if fusion is not None:
-            risk_idx = fusion_predict(fusion, device, ratio, change, pred_ratio, args.rain)
+            raw_risk_idx, confidence = fusion_predict(fusion, device, ratio, change, pred_ratio, args.rain)
+            source = "mlp"
         else:
-            risk_idx = rule_risk_index(ratio, pred_ratio, args.rain)
+            raw_risk_idx = rule_risk_index(ratio, pred_ratio, args.rain)
+            confidence = ""
+            source = "rule"
+        risk_idx = risk_smoother.update(raw_risk_idx) if is_sample else risk_smoother.current
+
+        if is_sample:
+            event_writer.write(
+                time_sec=round(frame_idx / fps, 3),
+                area_ratio=round(ratio, 6),
+                change_rate=round(change, 6),
+                pred_ratio=round(pred_ratio, 6),
+                rain_mmh=args.rain,
+                raw_risk=raw_risk_idx,
+                stable_risk=risk_idx,
+                source=source,
+                confidence="" if confidence == "" else round(confidence, 6),
+                emergency_plan=config.EMERGENCY_PLAN[risk_idx],
+            )
 
         _, _, color = config.RISK_LEVELS[risk_idx]
         vis = overlay_mask(frame, mask, color=color, alpha=config.OVERLAY_ALPHA)
@@ -189,11 +221,13 @@ def main():
 
     if writer is not None:
         writer.release()
+    event_writer.close()
 
     if history:
         draw_trend_curve(history, str(config.RESULT_DIR / "trend.png"))
         print(f"[完成] 共 {frame_idx} 帧，采样点 {len(history)} 个")
     print(f"输出视频：{out_path}")
+    print(f"风险事件记录：{event_path}")
 
 
 if __name__ == "__main__":

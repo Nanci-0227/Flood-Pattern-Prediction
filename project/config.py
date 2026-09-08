@@ -55,6 +55,8 @@ FUSION_CHECKPOINT = CHECKPOINT_DIR / "fusion_best.pth"
 SAMPLE_INTERVAL = 2.0               # 秒，采样间隔
 INFER_DEVICE = "auto"               # auto / cuda / cpu
 OVERLAY_ALPHA = 0.45                # 分割掩码叠加透明度
+RISK_SMOOTH_WINDOW = 5              # 风险中位数平滑窗口（采样点）
+RISK_DOWNGRADE_HOLD = 3             # 连续低风险采样点数达到后才允许降级
 
 # ===================== 风险等级（BGR 颜色） =====================
 # 键 = 类别索引，元组 = (名称, 描述, BGR颜色)
@@ -86,10 +88,13 @@ EMERGENCY_PLAN = {
 
 def rain_level_index(rain_mm_per_h: float) -> int:
     """将降雨强度(mm/h)映射为等级索引 0..4"""
-    for i, (thr, _) in enumerate(RAIN_LEVELS):
-        if rain_mm_per_h < thr:
-            return i
-    return len(RAIN_LEVELS) - 1
+    level = 0
+    for i, (threshold, _) in enumerate(RAIN_LEVELS):
+        if rain_mm_per_h >= threshold:
+            level = i
+        else:
+            break
+    return level
 
 
 def risk_label(idx: int) -> str:
