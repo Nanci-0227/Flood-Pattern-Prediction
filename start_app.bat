@@ -1,9 +1,16 @@
 @echo off
 setlocal
-cd /d "%~dp0project"
-py -3 app.py
-if errorlevel 1 (
+set "ROOT=%~dp0"
+set "PYTHON=%ROOT%.venv\Scripts\python.exe"
+
+if not exist "%PYTHON%" (
   echo.
-  echo 启动失败：请确认已安装 Python，并在 project 目录安装 requirements.txt 中的依赖。
+  echo 启动失败：未找到项目虚拟环境 .venv。
+  echo 请在项目根目录执行：py -3 -m venv .venv
   pause
+  exit /b 1
 )
+
+cd /d "%ROOT%project"
+"%PYTHON%" app.py
+if errorlevel 1 pause
