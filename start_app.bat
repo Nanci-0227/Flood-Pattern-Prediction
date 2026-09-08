@@ -2,6 +2,7 @@
 setlocal
 set "ROOT=%~dp0"
 set "PYTHON=%ROOT%.venv\Scripts\python.exe"
+set "APP=%ROOT%project\app.py"
 
 if not exist "%PYTHON%" (
   echo.
@@ -11,6 +12,16 @@ if not exist "%PYTHON%" (
   exit /b 1
 )
 
-cd /d "%ROOT%project"
-"%PYTHON%" app.py
-if errorlevel 1 pause
+if not exist "%APP%" (
+  echo.
+  echo 启动失败：未找到界面程序 %APP%
+  pause
+  exit /b 1
+)
+
+"%PYTHON%" "%APP%"
+if errorlevel 1 (
+  echo.
+  echo 界面启动失败，请保留以上错误信息。
+  pause
+)
