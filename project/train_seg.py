@@ -137,9 +137,10 @@ def main():
     ap.add_argument("--lr", type=float, default=config.SEG_LR)
     ap.add_argument("--val_split", type=float, default=0.15)
     ap.add_argument("--num_workers", type=int, default=4)
+    ap.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     args = ap.parse_args()
 
-    device = get_device()
+    device = get_device(args.device)
     print(f"[设备] {device}")
 
     train_base = FloodDataset(args.image_dir, args.mask_dir, augment=True)

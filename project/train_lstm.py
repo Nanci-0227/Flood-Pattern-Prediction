@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=config.LSTM_LR)
     ap.add_argument("--val_split", type=float, default=0.2)
+    ap.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     args = ap.parse_args()
     if not 0.0 < args.val_split < 1.0:
         raise SystemExit("val_split 必须位于 0 与 1 之间")
@@ -50,7 +51,7 @@ def main():
         raise SystemExit("数据量不足以按时间划分训练/验证集；请增加序列长度或减小验证比例")
     print(f"[数据] 序列样本数：{X.shape}，标签：{y.shape}，时间切分点：{split_point}")
 
-    device = get_device()
+    device = get_device(args.device)
     X_t = torch.from_numpy(X)
     y_t = torch.from_numpy(y)
 

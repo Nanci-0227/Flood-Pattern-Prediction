@@ -58,6 +58,7 @@ def main():
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=config.FUSION_LR)
     ap.add_argument("--val_split", type=float, default=0.2)
+    ap.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     args = ap.parse_args()
     if not 0.0 < args.val_split < 1.0:
         raise SystemExit("val_split 必须位于 0 与 1 之间")
@@ -66,7 +67,7 @@ def main():
     input_dim = X.shape[1]
     print(f"[数据] 特征列：{cols}，样本数：{len(y)}")
 
-    device = get_device()
+    device = get_device(args.device)
     if len(y) < 2:
         raise SystemExit("至少需要 2 条特征记录，才能划分训练集和验证集")
     n_val = min(max(1, int(len(y) * args.val_split)), len(y) - 1)
